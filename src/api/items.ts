@@ -28,6 +28,9 @@ export const dishesApi = {
 
   delete: (id: string) =>
     apiClient.delete(`/admin/dishes/${id}`),
+
+  toggleAvailability: (id: string) =>
+    apiClient.patch<Dish>(`/admin/dishes/${id}/availability`).then((r) => r.data),
 };
 
 // Keep backward-compatible alias

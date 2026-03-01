@@ -11,10 +11,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ImageUploader } from "@/components/ImageUploader";
-import { Plus, Pencil, Trash2, ImagePlus } from "lucide-react";
+import { Plus, Pencil, Trash2, ImagePlus, ChevronUp, ChevronDown, Star, X } from "lucide-react";
 import { toast } from "sonner";
+
+const PREDEFINED_TAGS = ["vegetariano", "vegano", "sin gluten", "picante", "sin lácteos", "kosher", "orgánico"];
 
 const MenuEditor = () => {
   const queryClient = useQueryClient();
@@ -26,13 +29,18 @@ const MenuEditor = () => {
   const [editingItem, setEditingItem] = useState<Dish | null>(null);
   const [targetCategoryId, setTargetCategoryId] = useState<string | null>(null);
 
-  // Form state
+  // Category form state
   const [catName, setCatName] = useState("");
   const [catDesc, setCatDesc] = useState("");
+
+  // Dish form state
   const [itemName, setItemName] = useState("");
   const [itemDesc, setItemDesc] = useState("");
   const [itemPrice, setItemPrice] = useState("");
+  const [itemSalePrice, setItemSalePrice] = useState("");
   const [itemAvailable, setItemAvailable] = useState(true);
+  const [itemFeatured, setItemFeatured] = useState(false);
+  const [itemTags, setItemTags] = useState<string[]>([]);
   const [itemImageUrl, setItemImageUrl] = useState<string | null>(null);
 
   const { data: restaurant } = useQuery({
@@ -73,6 +81,10 @@ const MenuEditor = () => {
     mutationFn: (id: string) => categoriesApi.delete(id),
     onSuccess: () => { invalidate(); toast.success("Categoría eliminada"); },
   });
+  const reorderCat = useMutation({
+    mutationFn: (ordered_ids: string[]) => categoriesApi.reorder(ordered_ids),
+    onSuccess: () => { invalidate(); toast.success("Orden actualizado"); },
+  });
 
   // Dish mutations
   const createItem = useMutation({
@@ -87,6 +99,24 @@ const MenuEditor = () => {
     mutationFn: (id: string) => dishesApi.delete(id),
     onSuccess: () => { invalidate(); toast.success("Plato eliminado"); },
   });
+  const toggleAvail = useMutation({
+    mutationFn: (id: string) => dishesApi.toggleAvailability(id),
+    onSuccess: () => { invalidate(); },
+  });
+
+  // ── Category reorder helpers ──
+  const moveCategoryUp = (idx: number) => {
+    if (!categories || idx <= 0) return;
+    const ids = categories.map((c) => c.id);
+    [ids[idx - 1], ids[idx]] = [ids[idx], ids[idx - 1]];
+    reorderCat.mutate(ids);
+  };
+  const moveCategoryDown = (idx: number) => {
+    if (!categories || idx >= categories.length - 1) return;
+    const ids = categories.map((c) => c.id);
+    [ids[idx], ids[idx + 1]] = [ids[idx + 1], ids[idx]];
+    reorderCat.mutate(ids);
+  };
 
   const openAddCategory = () => {
     setEditingCategory(null);
@@ -116,7 +146,10 @@ const MenuEditor = () => {
     setItemName("");
     setItemDesc("");
     setItemPrice("");
+    setItemSalePrice("");
     setItemAvailable(true);
+    setItemFeatured(false);
+    setItemTags([]);
     setItemImageUrl(null);
     setItemDialog(true);
   };
@@ -127,34 +160,38 @@ const MenuEditor = () => {
     setItemName(item.name);
     setItemDesc(item.description ?? "");
     setItemPrice(String(item.price));
+    setItemSalePrice(item.sale_price ? String(item.sale_price) : "");
     setItemAvailable(item.available);
+    setItemFeatured(item.featured);
+    setItemTags(item.tags ?? []);
     setItemImageUrl(item.image_url ?? null);
     setItemDialog(true);
   };
 
   const handleSaveItem = () => {
     if (!targetCategoryId) return;
+    const base = {
+      name: itemName,
+      description: itemDesc,
+      price: parseFloat(itemPrice),
+      sale_price: itemSalePrice ? parseFloat(itemSalePrice) : undefined,
+      available: itemAvailable,
+      featured: itemFeatured,
+      tags: itemTags.length > 0 ? itemTags : undefined,
+      category_id: targetCategoryId,
+      image_url: itemImageUrl ?? undefined,
+    };
     if (editingItem) {
-      const data: UpdateDishRequest = {
-        name: itemName,
-        description: itemDesc,
-        price: parseFloat(itemPrice),
-        available: itemAvailable,
-        category_id: targetCategoryId,
-        image_url: itemImageUrl ?? undefined,
-      };
-      updateItem.mutate({ id: editingItem.id, data });
+      updateItem.mutate({ id: editingItem.id, data: base as UpdateDishRequest });
     } else {
-      const data: CreateDishRequest = {
-        name: itemName,
-        description: itemDesc,
-        price: parseFloat(itemPrice),
-        available: itemAvailable,
-        category_id: targetCategoryId,
-        image_url: itemImageUrl ?? undefined,
-      };
-      createItem.mutate(data);
+      createItem.mutate(base as CreateDishRequest);
     }
+  };
+
+  const toggleTag = (tag: string) => {
+    setItemTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
   };
 
   const itemsByCategory = (catId: string) => allItems.filter((i) => i.category_id === catId);
@@ -184,12 +221,31 @@ const MenuEditor = () => {
         </div>
       ) : categories && categories.length > 0 ? (
         <Accordion type="multiple" className="space-y-3">
-          {categories.map((cat) => (
+          {categories.map((cat, catIdx) => (
             <AccordionItem key={cat.id} value={String(cat.id)} className="rounded-lg border bg-card">
               <AccordionTrigger className="px-4 hover:no-underline">
                 <div className="flex flex-1 items-center justify-between pr-4">
                   <span className="font-heading font-semibold">{cat.name}</span>
                   <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                    {/* Reorder buttons */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => moveCategoryUp(catIdx)}
+                      disabled={catIdx === 0}
+                      title="Subir"
+                    >
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => moveCategoryDown(catIdx)}
+                      disabled={catIdx === categories.length - 1}
+                      title="Bajar"
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </Button>
                     <Button variant="ghost" size="icon" onClick={() => openEditCategory(cat)}>
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
@@ -221,17 +277,43 @@ const MenuEditor = () => {
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium truncate">{item.name}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-medium truncate">{item.name}</p>
+                          {item.featured && <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />}
+                        </div>
                         <p className="text-sm text-muted-foreground truncate">{item.description}</p>
+                        {item.tags && item.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {item.tags.map((tag) => (
+                              <Badge key={tag} variant="secondary" className="text-[10px] px-1.5 py-0">
+                                {tag}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <div className="text-right">
-                        <p className="font-heading font-semibold text-primary">
-                          ${Number(item.price).toFixed(2)}
-                        </p>
-                        <span className={`text-xs ${item.available ? "text-success" : "text-destructive"}`}>
-                          {item.available ? "Disponible" : "No disponible"}
-                        </span>
+                      <div className="text-right flex-shrink-0">
+                        {item.sale_price ? (
+                          <>
+                            <p className="font-heading font-semibold text-primary">
+                              ${Number(item.sale_price).toFixed(2)}
+                            </p>
+                            <p className="text-xs text-muted-foreground line-through">
+                              ${Number(item.price).toFixed(2)}
+                            </p>
+                          </>
+                        ) : (
+                          <p className="font-heading font-semibold text-primary">
+                            ${Number(item.price).toFixed(2)}
+                          </p>
+                        )}
                       </div>
+                      {/* Quick toggle availability */}
+                      <Switch
+                        checked={item.available}
+                        onCheckedChange={() => toggleAvail.mutate(item.id)}
+                        title={item.available ? "Marcar como no disponible" : "Marcar como disponible"}
+                      />
                       <div className="flex gap-1">
                         <Button variant="ghost" size="icon" onClick={() => openEditItem(item)}>
                           <Pencil className="h-3.5 w-3.5" />
@@ -288,7 +370,7 @@ const MenuEditor = () => {
 
       {/* Item Dialog */}
       <Dialog open={itemDialog} onOpenChange={setItemDialog}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading">
               {editingItem ? "Editar plato" : "Nuevo plato"}
@@ -318,13 +400,47 @@ const MenuEditor = () => {
               <Label>Descripción</Label>
               <Textarea value={itemDesc} onChange={(e) => setItemDesc(e.target.value)} placeholder="Describe el plato" />
             </div>
-            <div>
-              <Label>Precio ($)</Label>
-              <Input type="number" step="0.01" value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} placeholder="0.00" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Precio ($)</Label>
+                <Input type="number" step="0.01" value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} placeholder="0.00" />
+              </div>
+              <div>
+                <Label>Precio oferta ($)</Label>
+                <Input type="number" step="0.01" value={itemSalePrice} onChange={(e) => setItemSalePrice(e.target.value)} placeholder="Opcional" />
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <Switch checked={itemAvailable} onCheckedChange={setItemAvailable} />
-              <Label>Disponible</Label>
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <Switch checked={itemAvailable} onCheckedChange={setItemAvailable} />
+                <Label>Disponible</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch checked={itemFeatured} onCheckedChange={setItemFeatured} />
+                <Label className="flex items-center gap-1">
+                  <Star className="h-3.5 w-3.5" /> Destacado
+                </Label>
+              </div>
+            </div>
+            <div>
+              <Label>Etiquetas</Label>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {PREDEFINED_TAGS.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => toggleTag(tag)}
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                      itemTags.includes(tag)
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    }`}
+                  >
+                    {tag}
+                    {itemTags.includes(tag) && <X className="ml-1 h-3 w-3 inline" />}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
           <DialogFooter>

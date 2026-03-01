@@ -1,4 +1,9 @@
 node_modules
 dist
-.env.local
+coverage
 .git
+*.md
+.env*
+.vscode
+vitest.config.ts
+src/test

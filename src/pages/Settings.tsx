@@ -9,8 +9,36 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ImageUploader } from "@/components/ImageUploader";
-import { Pencil, Trash2, Plus, Store } from "lucide-react";
+import { Pencil, Trash2, Plus, Store, Clock } from "lucide-react";
 import { toast } from "sonner";
+
+const DAYS = [
+  { key: "lunes", label: "Lunes" },
+  { key: "martes", label: "Martes" },
+  { key: "miercoles", label: "Miércoles" },
+  { key: "jueves", label: "Jueves" },
+  { key: "viernes", label: "Viernes" },
+  { key: "sabado", label: "Sábado" },
+  { key: "domingo", label: "Domingo" },
+];
+
+type HoursMap = Record<string, { open: string; close: string }>;
+
+const defaultHours = (): HoursMap =>
+  Object.fromEntries(DAYS.map((d) => [d.key, { open: "08:00", close: "22:00" }]));
+
+const parseHours = (raw: Record<string, unknown> | null): HoursMap => {
+  if (!raw) return defaultHours();
+  const result: HoursMap = {};
+  for (const d of DAYS) {
+    const val = raw[d.key] as { open?: string; close?: string } | undefined;
+    result[d.key] = {
+      open: val?.open ?? "08:00",
+      close: val?.close ?? "22:00",
+    };
+  }
+  return result;
+};
 
 const Settings = () => {
   const queryClient = useQueryClient();
@@ -27,6 +55,7 @@ const Settings = () => {
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [hours, setHours] = useState<HoursMap>(defaultHours);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["restaurant"] });
 
@@ -54,6 +83,7 @@ const Settings = () => {
     setAddress("");
     setPhone("");
     setLogoUrl(null);
+    setHours(defaultHours());
     setDialog(true);
   };
 
@@ -65,16 +95,38 @@ const Settings = () => {
     setAddress(restaurant.address ?? "");
     setPhone(restaurant.phone ?? "");
     setLogoUrl(restaurant.logo_url ?? null);
+    setHours(parseHours(restaurant.hours));
     setDialog(true);
   };
 
+  const updateHour = (day: string, field: "open" | "close", value: string) => {
+    setHours((prev) => ({ ...prev, [day]: { ...prev[day], [field]: value } }));
+  };
+
   const handleSave = () => {
-    const data = { name, description, address, phone, logo_url: logoUrl ?? undefined };
+    const data = {
+      name,
+      description,
+      address,
+      phone,
+      logo_url: logoUrl ?? undefined,
+      hours: hours as Record<string, unknown>,
+    };
     if (isEditing) {
       updateMut.mutate(data);
     } else {
       createMut.mutate(data);
     }
+  };
+
+  // Format hours for display
+  const formatHoursDisplay = (raw: Record<string, unknown> | null) => {
+    if (!raw) return null;
+    const parsed = parseHours(raw);
+    return DAYS.map((d) => {
+      const h = parsed[d.key];
+      return `${d.label}: ${h.open} – ${h.close}`;
+    });
   };
 
   return (
@@ -112,11 +164,23 @@ const Settings = () => {
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">{restaurant.description}</p>
-            {restaurant.address && <p className="mt-2 text-xs text-muted-foreground">📍 {restaurant.address}</p>}
+          <CardContent className="space-y-2">
+            {restaurant.description && <p className="text-sm text-muted-foreground">{restaurant.description}</p>}
+            {restaurant.address && <p className="text-xs text-muted-foreground">📍 {restaurant.address}</p>}
             {restaurant.phone && <p className="text-xs text-muted-foreground">📞 {restaurant.phone}</p>}
             {restaurant.slug && <p className="text-xs text-muted-foreground">🔗 Menú: /m/{restaurant.slug}</p>}
+            {restaurant.hours && (
+              <div className="pt-2 border-t border-border mt-2">
+                <p className="text-xs font-medium flex items-center gap-1 mb-1">
+                  <Clock className="h-3 w-3" /> Horarios
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5">
+                  {formatHoursDisplay(restaurant.hours)?.map((line) => (
+                    <p key={line} className="text-xs text-muted-foreground">{line}</p>
+                  ))}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -129,7 +193,7 @@ const Settings = () => {
       )}
 
       <Dialog open={dialog} onOpenChange={setDialog}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading">
               {isEditing ? "Editar restaurante" : "Nuevo restaurante"}
@@ -171,6 +235,32 @@ const Settings = () => {
             <div>
               <Label>Teléfono</Label>
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+57 300 123 4567" />
+            </div>
+            {/* Hours editor */}
+            <div>
+              <Label className="flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5" /> Horarios de atención
+              </Label>
+              <div className="mt-2 space-y-2">
+                {DAYS.map((day) => (
+                  <div key={day.key} className="flex items-center gap-2">
+                    <span className="w-24 text-sm text-muted-foreground">{day.label}</span>
+                    <Input
+                      type="time"
+                      value={hours[day.key]?.open ?? "08:00"}
+                      onChange={(e) => updateHour(day.key, "open", e.target.value)}
+                      className="w-28"
+                    />
+                    <span className="text-xs text-muted-foreground">a</span>
+                    <Input
+                      type="time"
+                      value={hours[day.key]?.close ?? "22:00"}
+                      onChange={(e) => updateHour(day.key, "close", e.target.value)}
+                      className="w-28"
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
           <DialogFooter>
