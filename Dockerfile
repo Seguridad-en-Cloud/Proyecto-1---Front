@@ -36,6 +36,12 @@ RUN npm run build
 # ── Stage 2: runtime ──────────────────────────────────────────────────────
 FROM nginxinc/nginx-unprivileged:${NGINX_VERSION} AS runtime
 
+# Temporarily switch to root to install security patches for alpine
+USER root
+RUN apk update && apk upgrade --no-cache
+# Switch back to the non-root user that the base image uses
+USER nginx
+
 # Drop the stock default.conf and use ours.
 COPY --chown=nginx:nginx nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build --chown=nginx:nginx /app/dist /usr/share/nginx/html
