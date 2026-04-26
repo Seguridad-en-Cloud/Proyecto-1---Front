@@ -1,4 +1,16 @@
 node_modules
 dist
+.env
 .env.local
+.env.*.local
 .git
+.gitignore
+.vscode
+.idea
+*.log
+coverage
+.DS_Store
+bun.lock
+bun.lockb
+README.md
+docs
