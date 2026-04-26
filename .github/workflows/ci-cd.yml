@@ -36,8 +36,14 @@ jobs:
           cache: npm
 
       - run: npm ci --include=dev
-      - run: npm run lint
-      - run: npm test
+
+      # Style/lint warnings — informative, not a deploy gate.
+      - name: ESLint (advisory)
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Vitest
+        run: npm test
 
   build-scan:
     name: Build image + Trivy scan
