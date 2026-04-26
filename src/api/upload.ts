@@ -6,6 +6,28 @@ export interface UploadResponse {
   large: string;
 }
 
+/**
+ * Extract the object key from a public URL produced by the backend.
+ *
+ * The backend always returns URLs shaped as ``<public-prefix>/<key>`` where
+ * the key starts with ``logos/`` or ``dishes/``. We don't know the prefix at
+ * build time (it depends on whether the deployment uses MinIO/S3 or GCS, and
+ * whether GCS is fronted by a CDN), so we locate the first ``/logos/`` or
+ * ``/dishes/`` segment and treat everything from there onward as the key.
+ */
+function extractObjectKey(url: string): string {
+  const markers = ["/logos/", "/dishes/"];
+  for (const marker of markers) {
+    const idx = url.indexOf(marker);
+    if (idx !== -1) {
+      return url.slice(idx + 1);
+    }
+  }
+  // Fallback: if the URL doesn't match a known prefix, assume it already is
+  // the key (e.g. a relative path returned by a future backend version).
+  return url;
+}
+
 export const uploadApi = {
   /**
    * Upload an image. Returns URLs for thumbnail, medium, and large variants.
@@ -23,10 +45,7 @@ export const uploadApi = {
 
   /** Delete an uploaded image by its URL */
   delete: (url: string) => {
-    // Extract the object key (filename path) from the full URL
-    // e.g., "http://localhost:9000/livemenu/dishes/large/abc.webp" → "dishes/large/abc.webp"
-    const parts = url.split("/livemenu/");
-    const filename = parts.length > 1 ? parts[parts.length - 1] : url;
+    const filename = extractObjectKey(url);
     return apiClient.delete(`/admin/upload/${filename}`);
   },
 };
